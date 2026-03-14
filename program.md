@@ -263,7 +263,6 @@ MAX_EPOCHS   = 120   # epochs per fold — tunable
 
 After every experiment, append the following block to `outputs/research_log.md`:
 
-```markdown
 ---
 ## Experiment <N> — <timestamp>
 **Experiment ID (commit hash):** <experiment_id>
@@ -288,7 +287,6 @@ diff
 **Interpretation:** <2–4 sentences: did it work? why? what does this suggest?>
 
 **Next hypothesis:** <what to try next based on this result>
-```
 
 ---
 
