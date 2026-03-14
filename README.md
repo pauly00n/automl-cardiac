@@ -1,4 +1,4 @@
-# foundation-mm-agent-framework
+# automl-cardiac
 
 Autonomous ML experiment framework for **cardiac MRI classification** on the
 [ACDC dataset](https://www.creatis.insa-lyon.fr/Challenge/acdc/).
