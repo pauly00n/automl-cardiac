@@ -46,3 +46,28 @@
 **Interpretation:** Strong improvement (+0.07 mean val_acc). MINF jumped from 0.45→0.70, confirming overfitting was hurting the hard classes most. Variance also reduced (0.1166→0.0949). Total wall time only 85.5s — we're using less than 10% of the budget. Fold 3 still weak at 0.60. HCM is now the weakest class at 0.55. Since we're only using ~17s per fold, we can afford many more epochs — try 200 epochs to see if more training with the cosine schedule helps.
 
 **Next hypothesis:** Try MAX_EPOCHS=200 — with only 17s per fold we have budget headroom, and the cosine schedule may benefit from a longer warmup/decay cycle.
+
+---
+## Experiment 3 — 2026-03-14T23:53:04Z
+**Experiment ID (commit hash):** 10456cd00875
+
+**Hypothesis:** MAX_EPOCHS=200 will allow the cosine schedule to decay more gradually and improve convergence.
+
+**Change made:**
+```diff
+- MAX_EPOCHS = 60
++ MAX_EPOCHS = 200
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6200 |
+| val_acc (std)  | 0.0980 |
+| per_fold_acc   | [0.80, 0.60, 0.60, 0.50, 0.60] |
+| per_class_acc  | NOR=0.40  DCM=0.75  HCM=0.65  MINF=0.50  RV=0.80 |
+| prev best      | 0.7000 |
+
+**Interpretation:** Worse than E2 (0.62 vs 0.70). More epochs caused overfitting — train_acc reached 1.0 in some folds while val_acc dropped. NOR collapsed to 0.40. MAX_EPOCHS=60 was the sweet spot. The model clearly overfits with 200 epochs. Reverting to 60 epochs and trying a different direction.
+
+**Next hypothesis:** Keep MAX_EPOCHS=60 and add label smoothing (0.1) to reduce overconfidence and improve generalization on hard classes.
