@@ -96,3 +96,29 @@
 **Interpretation:** Slightly worse than E2 (0.68 vs 0.70). Label smoothing didn't help here — it may be slowing convergence within the 60-epoch budget. Fold 3 still weak at 0.55. HCM remains the hardest class. Reverting label smoothing and trying class-weighted CE to specifically boost MINF and RV.
 
 **Next hypothesis:** Remove label smoothing, keep MAX_EPOCHS=60, add class weights [1,1,1,2,2] to upweight MINF and RV (the historically hard classes).
+
+---
+## Experiment 5 — 2026-03-14T23:58:33Z
+**Experiment ID (commit hash):** cbbfb9d12f7e
+
+**Hypothesis:** Class-weighted CE [1,1,1,2,2] will upweight MINF and RV, improving accuracy on hard classes.
+
+**Change made:**
+```diff
+- criterion = nn.CrossEntropyLoss()
++ class_weights = torch.tensor([1.0, 1.0, 1.0, 2.0, 2.0], device=DEVICE)
++ criterion = nn.CrossEntropyLoss(weight=class_weights)
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6800 |
+| val_acc (std)  | 0.0927 |
+| per_fold_acc   | [0.85, 0.70, 0.60, 0.60, 0.65] |
+| per_class_acc  | NOR=0.60  DCM=0.75  HCM=0.55  MINF=0.70  RV=0.80 |
+| prev best      | 0.7000 |
+
+**Interpretation:** Same as E4 (0.68), still below E2 (0.70). Class weighting didn't help — the model already gets MINF=0.70 and RV=0.80 with plain CE. HCM remains the bottleneck at 0.55. The loss function changes (E4, E5) haven't beaten plain CE. Reverting to plain CE + MAX_EPOCHS=60 and trying richer augmentation (depth flip + intensity jitter + gaussian noise) to improve generalization.
+
+**Next hypothesis:** Keep MAX_EPOCHS=60 + plain CE, add depth flip (p=0.5), intensity jitter, and gaussian noise augmentations to improve generalization.
