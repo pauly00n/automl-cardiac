@@ -4,7 +4,7 @@ Autonomous ML experiment framework for **cardiac MRI classification** on the
 [ACDC dataset](https://www.creatis.insa-lyon.fr/Challenge/acdc/).
 
 Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch):
-an AI agent autonomously iterates on `train.py`, runs fixed-budget (1-min)
+an AI agent autonomously iterates on `train.py`, runs fixed-budget (3-min)
 experiments, checks `val_acc`, and repeats — logging every hypothesis and
 result to `outputs/`.
 
@@ -18,7 +18,8 @@ blackbox-mm-prototype/
 │   └── processed/      ← .pt tensors (train / val / test)
 ├── outputs/
 │   ├── results.jsonl              ← one JSON line per experiment
-│   ├── confusion_matrix_<id>.png  ← per-run confusion matrix (mri+clinical runs)
+│   ├── confusion_matrices/        ← per-run confusion matrix PNGs
+│   │   └── confusion_matrix_<id>.png
 │   └── research_log.md            ← agent's running hypothesis log
 ├── program.md          ← instructions for the AI agent
 ├── pyproject.toml
@@ -110,8 +111,8 @@ uv run src/prepare.py --force-download  # re-download even if zip exists
 uv run src/train.py
 ```
 
-- Trains for exactly **1 minute** wall-clock time (`BUDGET_SECONDS = 60`).
-- Prints a summary at the end:
+- Trains for exactly **3 minutes** wall-clock time per seed (`BUDGET_SECONDS = 180`).
+- Prints a summary at the end: (averaging)
   ```
   ============================================================
     experiment_id : dbdb0fe5
@@ -122,10 +123,19 @@ uv run src/train.py
     epochs_run    : 240
     wall_time_s   : 53.5
   ============================================================
+  seeds:     [42, 7, 13]
+     val_acc:   mean=0.7333  std=0.0577
+     test_acc:  mean=0.6167  std=0.0289
+       seed=42  val=0.7000  test=0.6000  pca={'NOR': 0.75, 'DCM': 1.0, 'HCM': 0.75, 'MINF': 0.5,
+     'RV': 0.5}
+       seed=7  val=0.8000  test=0.6000  pca={'NOR': 1.0, 'DCM': 1.0, 'HCM': 1.0, 'MINF': 0.5,
+     'RV': 0.5}
+       seed=13  val=0.7000  test=0.6500  pca={'NOR': 1.0, 'DCM': 1.0, 'HCM': 0.75, 'MINF': 0.5,
+     'RV': 0.25}
   ```
 - Appends one JSON line to `outputs/results.jsonl` (includes `modality`,
   `per_class_acc`, and all config fields).
-- Saves a confusion matrix PNG to `outputs/confusion_matrix_<id>.png`.
+- Saves a confusion matrix PNG to `outputs/confusion_matrices/`.
 
 ---
 
@@ -167,45 +177,6 @@ for line in sys.stdin:
 # View the agent's research log
 cat outputs/research_log.md
 ```
-
----
-
-## Architecture
-
-### MRI Encoder (`CardiacCNN3D`) — unchanged
-
-```
-Input (B, 1, 16, 128, 128)
-  │
-  ├─ Stage1: ConvBlock3D(1→16)  + ResBlock3D(16)   → (B, 16, 16, 64, 64)
-  ├─ Stage2: ConvBlock3D(16→32) + ResBlock3D(32)   → (B, 32, 16, 32, 32)
-  ├─ Stage3: ConvBlock3D(32→64) + ResBlock3D(64)   → (B, 64, 16, 16, 16)
-  ├─ Stage4: ConvBlock3D(64→128)+ ResBlock3D(128)  → (B, 128, 16, 8, 8)
-  │
-  └─ GlobalAvgPool3d → Dropout → (B, 128)  ← MRI embedding
-```
-
-Each `ResBlock3D` includes a **Squeeze-and-Excitation** channel attention
-module and optional stochastic depth.
-
-### Clinical Encoder (`ClinicalEncoder`) — new
-
-```
-Input (B, 5)  ← [Height, Weight, EDV, ESV, EF]
-  │
-  ├─ Linear(5→64)  → BN → ReLU
-  └─ Linear(64→128)→ BN → ReLU  → (B, 128)  ← clinical embedding
-```
-
-### Fusion Head (`MultiModalCardiacNet`) — new
-
-```
-MRI embedding    (B, 128)  ┐
-                            ├─ cat → (B, 256) → Linear(256, 5) → logits
-Clinical embedding (B, 128) ┘
-```
-
-Total parameters per ensemble member: **~1.5 M**
 
 ---
 
@@ -252,16 +223,18 @@ Each line is a JSON object:
 
 ## Hyperparameters (top of `train.py`)
 
+The agent freely modifies these between experiments. Architecture-coupled
+values (`MAX_EPOCHS`, `N_ENSEMBLE`, etc.) are omitted here because they
+change with the model.
+
 | Constant | Default | Description |
 |----------|---------|-------------|
 | `LR` | `5e-4` | AdamW learning rate |
 | `BATCH_SIZE` | `8` | Samples per GPU step |
 | `DROPOUT` | `0.5` | Dropout before classifier |
-| `WEIGHT_DECAY` | `0.05` | AdamW weight decay |
+| `WEIGHT_DECAY` | `0.1` | AdamW weight decay |
 | `USE_AMP` | `True` | Mixed precision (fp16) |
-| `MAX_EPOCHS` | `120` | Epochs per ensemble member |
-| `N_ENSEMBLE` | `2` | Number of independently trained models |
-| `BUDGET_SECONDS` | `60` | **Fixed — do not change** |
+| `BUDGET_SECONDS` | `180` | **Fixed — do not change** |
 
 ---
 

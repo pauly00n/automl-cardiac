@@ -563,7 +563,9 @@ def main():
                 ax.text(j, i, str(conf[i, j]), ha="center", va="center",
                         color="white" if conf[i, j] > conf.max() / 2 else "black")
         plt.tight_layout()
-        cm_path = OUTPUTS_DIR / f"confusion_matrix_{experiment_id}.png"
+        cm_dir = OUTPUTS_DIR / "confusion_matrices"
+        cm_dir.mkdir(parents=True, exist_ok=True)
+        cm_path = cm_dir / f"confusion_matrix_{experiment_id}.png"
         plt.savefig(cm_path, dpi=120)
         plt.close(fig)
         log.info("Confusion matrix saved → %s", cm_path)
