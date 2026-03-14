@@ -71,3 +71,28 @@
 **Interpretation:** Worse than E2 (0.62 vs 0.70). More epochs caused overfitting — train_acc reached 1.0 in some folds while val_acc dropped. NOR collapsed to 0.40. MAX_EPOCHS=60 was the sweet spot. The model clearly overfits with 200 epochs. Reverting to 60 epochs and trying a different direction.
 
 **Next hypothesis:** Keep MAX_EPOCHS=60 and add label smoothing (0.1) to reduce overconfidence and improve generalization on hard classes.
+
+---
+## Experiment 4 — 2026-03-14T23:56:06Z
+**Experiment ID (commit hash):** d9aacf611276
+
+**Hypothesis:** Label smoothing=0.1 will reduce overconfidence and improve generalization on hard classes.
+
+**Change made:**
+```diff
+- criterion = nn.CrossEntropyLoss()
++ criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6800 |
+| val_acc (std)  | 0.1030 |
+| per_fold_acc   | [0.85, 0.70, 0.55, 0.60, 0.70] |
+| per_class_acc  | NOR=0.60  DCM=0.75  HCM=0.55  MINF=0.70  RV=0.80 |
+| prev best      | 0.7000 |
+
+**Interpretation:** Slightly worse than E2 (0.68 vs 0.70). Label smoothing didn't help here — it may be slowing convergence within the 60-epoch budget. Fold 3 still weak at 0.55. HCM remains the hardest class. Reverting label smoothing and trying class-weighted CE to specifically boost MINF and RV.
+
+**Next hypothesis:** Remove label smoothing, keep MAX_EPOCHS=60, add class weights [1,1,1,2,2] to upweight MINF and RV (the historically hard classes).
