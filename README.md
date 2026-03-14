@@ -1,4 +1,4 @@
-# blackbox-mm-prototype
+# foundation-mm-agent-framework
 
 Autonomous ML experiment framework for **cardiac MRI classification** on the
 [ACDC dataset](https://www.creatis.insa-lyon.fr/Challenge/acdc/).
@@ -171,18 +171,6 @@ Each line is a JSON object:
 
 ---
 
-## GPU
-
-Tested on **NVIDIA H100 80 GB**.  
-Uses `torch.device("cuda")` automatically, falling back to CPU.
-
----
-
-## License
-
-MIT
-
----
 
 ## Starting an autonomous research run
 
@@ -204,3 +192,19 @@ The agent will:
 
 Results accumulate in `outputs/results.jsonl` and `outputs/research_log.md` on the branch.
 Each experiment is a git commit — `git log --oneline` gives the full history.
+
+---
+
+
+## GPU
+
+Tested on **NVIDIA H100 80 GB**.  
+Uses `torch.device("cuda")` automatically, falling back to CPU.
+
+---
+
+## License
+
+MIT
+
+---
