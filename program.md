@@ -272,14 +272,11 @@ After every experiment, append the following block to `outputs/research_log.md`:
 ```
 
 **Change made:**
-```markdown
 diff
 - old line(s) from train.py
 + new line(s) from train.py
-```
 
 **Results:**
-```markdown
 | Metric | Value |
 |--------|-------|
 | val_acc (mean) | X.XXXX |
