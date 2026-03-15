@@ -56,7 +56,7 @@ ARCH_NOTES = (
     "Gated fusion: gate=sigmoid(Linear(128,128)) applied to MRI feat, concat(gated_mri, clinical)→Linear(256,5). "
     "5-fold CV on 100 patients. CosineAnnealingLR T_max=MAX_EPOCHS. "
     "DROPOUT=0.5. WD=0.1. H+V flip. Standard CE. TTA=8 passes. LR=5e-4. BS=8. "
-    "Clinical z-score normalization (5 features). MAX_EPOCHS=60. Plain CE. H+V flips. LR=5e-4. Original arch. CosineAnnealingLR. Gated fusion. BS=8. Log-transform EDV+ESV clinical features."
+    "Clinical z-score normalization (7 features). MAX_EPOCHS=60. Plain CE. H+V flips. LR=5e-4. Original arch. CosineAnnealingLR. Gated fusion. BS=8. Log-transform EDV+ESV + derived BMI+SV."
 )
 
 MAX_EPOCHS = 60
@@ -265,7 +265,7 @@ class ClinicalEncoder(nn.Module):
     def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(5, 64),
+            nn.Linear(7, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(inplace=True),
             nn.Linear(64, 128),
@@ -322,13 +322,17 @@ _CLINICAL_STD:  torch.Tensor = None
 
 
 def augment_clinical(clinical: torch.Tensor) -> torch.Tensor:
-    """Log-transform EDV (index 2) and ESV (index 3) to reduce right-skew.
-    Input/Output: (B, 5) [Height, Weight, EDV, ESV, EF]
+    """Log-transform EDV/ESV and add derived features BMI and SV.
+    Input:  (B, 5) [Height, Weight, EDV, ESV, EF]
+    Output: (B, 7) [Height, Weight, log(1+EDV), log(1+ESV), EF, BMI, SV]
     """
     out = clinical.clone()
     out[:, 2] = torch.log1p(clinical[:, 2])  # log(1 + EDV)
     out[:, 3] = torch.log1p(clinical[:, 3])  # log(1 + ESV)
-    return out
+    height_m = clinical[:, 0] / 100.0
+    bmi = clinical[:, 1] / (height_m * height_m + 1e-8)
+    sv  = clinical[:, 2] - clinical[:, 3]  # EDV - ESV (original, not log)
+    return torch.cat([out, bmi.unsqueeze(1), sv.unsqueeze(1)], dim=1)
 
 
 def normalize_clinical(clinical: torch.Tensor) -> torch.Tensor:
