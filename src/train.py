@@ -56,11 +56,11 @@ ARCH_NOTES = (
     "Gated fusion: gate=sigmoid(Linear(128,128)) applied to MRI feat, concat(gated_mri, clinical)→Linear(256,5). "
     "5-fold CV on 100 patients. CosineAnnealingLR T_max=MAX_EPOCHS. "
     "DROPOUT=0.5. WD=0.1. H+V flip. Standard CE. TTA=8 passes. LR=5e-4. BS=8. "
-    "Clinical z-score normalization (5 features). MAX_EPOCHS=60. Plain CE. H+V flips. LR=5e-4. Original arch (1→16→32→64→128). OneCycleLR max_lr=5e-4."
+    "Clinical z-score normalization (5 features). MAX_EPOCHS=60. Plain CE. H+V flips. LR=5e-4. Original arch. CosineAnnealingLR. Mixup alpha=0.4."
 )
 
 MAX_EPOCHS = 60
-MIXUP_ALPHA = 0.0  # Mixup disabled
+MIXUP_ALPHA = 0.4  # Mixup enabled
 
 # Training budget (seconds) per fold — do NOT change this
 BUDGET_SECONDS = 180  # 3 minutes per fold
@@ -407,8 +407,6 @@ def train_one_epoch(
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
-        if scheduler is not None:
-            scheduler.step()
 
         total_loss    += loss.item() * labels.size(0)
         preds          = logits.detach().argmax(dim=1)
@@ -562,12 +560,7 @@ def main():
         model     = MultiModalCardiacNet(num_classes=NUM_CLASSES, dropout=DROPOUT).to(DEVICE)
         optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
         scaler    = GradScaler(enabled=USE_AMP)
-        steps_per_epoch = max(1, len(train_loader))
-        scheduler = optim.lr_scheduler.OneCycleLR(
-            optimizer, max_lr=LR,
-            epochs=MAX_EPOCHS, steps_per_epoch=steps_per_epoch,
-            pct_start=0.3, anneal_strategy='cos',
-        )
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS, eta_min=1e-6)
         criterion = nn.CrossEntropyLoss()
 
         # Train with budget
@@ -587,6 +580,8 @@ def main():
                          loss_sum / n_total, n_correct / n_total)
             if timed_out:
                 break
+            if scheduler is not None:
+                scheduler.step()
 
         fold_time = time.time() - t_fold_start
         log.info("  Fold %d: %d epochs in %.1fs", fold_idx + 1, epoch, fold_time)
