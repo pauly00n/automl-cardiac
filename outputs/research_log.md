@@ -453,3 +453,28 @@
 **Interpretation:** Worse than E17 (0.69 vs 0.72). More epochs caused overfitting — fold 5 dropped to 0.60. MAX_EPOCHS=60 is the sweet spot for this config. E17 remains the best. Trying depth flip augmentation on top of E17 config.
 
 **Next hypothesis:** Revert MAX_EPOCHS to 60, keep E17 config (log-transform + derived features), and add depth flip (p=0.5) augmentation only (no intensity jitter/noise).
+
+---
+## Experiment 19 — 2026-03-15T00:50:53Z
+**Experiment ID (commit hash):** 9812e73a36a7
+
+**Hypothesis:** Adding depth flip to E17 config will improve generalization.
+
+**Change made:**
+```diff
++ if torch.rand(1).item() < 0.5:
++     volumes[i] = torch.flip(volumes[i], dims=[-3])   # D flip
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6900 |
+| val_acc (std)  | 0.0860 |
+| per_fold_acc   | [0.85, 0.70, 0.60, 0.65, 0.65] |
+| per_class_acc  | NOR=0.70  DCM=0.65  HCM=0.70  MINF=0.70  RV=0.70 |
+| prev best      | 0.7200 |
+
+**Interpretation:** Worse than E17 (0.69 vs 0.72). Depth flip hurt fold 3 (0.75→0.60). E17 remains the best. Three consecutive experiments (E18, E19) haven't beaten E17. Trying DROPOUT=0.6 with E17 config as final experiment.
+
+**Next hypothesis:** Revert to H+V flips only, keep E17 config (log-transform + derived features, MAX_EPOCHS=60), and increase DROPOUT from 0.5 to 0.6 to reduce overfitting.
