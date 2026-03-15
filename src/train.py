@@ -56,10 +56,10 @@ ARCH_NOTES = (
     "Gated fusion: gate=sigmoid(Linear(128,128)) applied to MRI feat, concat(gated_mri, clinical)→Linear(256,5). "
     "5-fold CV on 100 patients. CosineAnnealingLR T_max=MAX_EPOCHS. "
     "DROPOUT=0.5. WD=0.1. H+V flip. Standard CE. TTA=8 passes. LR=5e-4. BS=8. "
-    "Clinical z-score normalization (7 features). MAX_EPOCHS=80. Plain CE. H+V flips. LR=5e-4. Original arch. CosineAnnealingLR. Gated fusion. BS=8. Log-transform EDV+ESV + derived BMI+SV."
+    "Clinical z-score normalization (7 features). MAX_EPOCHS=60. Plain CE. H+V+D flips. LR=5e-4. Original arch. CosineAnnealingLR. Gated fusion. BS=8. Log-transform EDV+ESV + derived BMI+SV."
 )
 
-MAX_EPOCHS = 80
+MAX_EPOCHS = 60
 MIXUP_ALPHA = 0.0  # Mixup disabled
 
 # Training budget (seconds) per fold — do NOT change this
@@ -375,13 +375,15 @@ def train_one_epoch(
         clinical = augment_clinical(clinical)
         clinical = normalize_clinical(clinical)
 
-        # Augmentation: H+V flips only
+        # Augmentation: H+V+D flips
         B = volumes.size(0)
         for i in range(B):
             if torch.rand(1).item() < 0.5:
                 volumes[i] = torch.flip(volumes[i], dims=[-1])   # H flip
             if torch.rand(1).item() < 0.5:
                 volumes[i] = torch.flip(volumes[i], dims=[-2])   # V flip
+            if torch.rand(1).item() < 0.5:
+                volumes[i] = torch.flip(volumes[i], dims=[-3])   # D flip
 
         # Mixup augmentation
         if MIXUP_ALPHA > 0 and B > 1:
