@@ -56,7 +56,7 @@ ARCH_NOTES = (
     "Gated fusion: gate=sigmoid(Linear(128,128)) applied to MRI feat, concat(gated_mri, clinical)→Linear(256,5). "
     "5-fold CV on 100 patients. CosineAnnealingLR T_max=MAX_EPOCHS. "
     "DROPOUT=0.5. WD=0.1. H+V flip. Standard CE. TTA=8 passes. LR=5e-4. BS=8. "
-    "Clinical z-score normalization (5 features). MAX_EPOCHS=60. Plain CE. H+V flips. LR=5e-4. Wider MRI encoder: 1→32→64→128→256. ClinicalEncoder→256. Fusion: concat(256+256)→Linear(512,5)."
+    "Clinical z-score normalization (7 features). MAX_EPOCHS=60. Plain CE. H+V flips. LR=5e-4. Wider MRI encoder: 1→32→64→128→256. ClinicalEncoder(7→64→256). Fusion: concat(256+256)→Linear(512,5). Derived: BMI+SV."
 )
 
 MAX_EPOCHS = 60
@@ -258,14 +258,14 @@ class CardiacCNN3D(nn.Module):
 class ClinicalEncoder(nn.Module):
     """
     MLP encoder for tabular clinical features.
-    Input:  (B, 5)  — [Height, Weight, EDV, ESV, EF]
+    Input:  (B, 7)  — [Height, Weight, EDV, ESV, EF, BMI, SV]
     Output: (B, 256)
     """
 
     def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(5, 64),
+            nn.Linear(7, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(inplace=True),
             nn.Linear(64, 256),
@@ -374,7 +374,8 @@ def train_one_epoch(
         clinical = clinical.to(DEVICE, non_blocking=True)
         labels   = labels.to(DEVICE, non_blocking=True)
 
-        # Z-score normalize clinical features
+        # Add derived clinical features then z-score normalize
+        clinical = augment_clinical(clinical)
         clinical = normalize_clinical(clinical)
 
         # Augmentation: H+V flips only
@@ -436,6 +437,7 @@ def evaluate_with_tta(model, loader):
         volumes  = volumes.to(DEVICE, non_blocking=True)
         clinical = clinical.to(DEVICE, non_blocking=True)
         labels   = labels.to(DEVICE, non_blocking=True)
+        clinical = augment_clinical(clinical)
         clinical = normalize_clinical(clinical)
         B = volumes.size(0)
         probs_sum = torch.zeros(B, NUM_CLASSES, device=DEVICE)
@@ -549,7 +551,7 @@ def main():
         # Compute clinical normalization stats from this fold's training set
         all_clinical = []
         for _, clinical, _ in train_loader:
-            all_clinical.append(clinical)
+            all_clinical.append(augment_clinical(clinical))
         all_clinical = torch.cat(all_clinical, dim=0)
         _CLINICAL_MEAN = all_clinical.mean(dim=0).to(DEVICE)
         _CLINICAL_STD  = all_clinical.std(dim=0).to(DEVICE)
