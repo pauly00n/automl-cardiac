@@ -278,3 +278,28 @@
 **Interpretation:** Worse than E2 (0.67 vs 0.70). OneCycleLR didn't help — fold 2 dropped to 0.60 and fold 3 to 0.55. CosineAnnealingLR is better for this task. Reverting to CosineAnnealingLR and trying Mixup augmentation (alpha=0.4) which is known to be effective for small datasets.
 
 **Next hypothesis:** Revert to CosineAnnealingLR, MAX_EPOCHS=60, and enable Mixup (MIXUP_ALPHA=0.4) to improve generalization on the small 80-patient training set.
+
+---
+## Experiment 12 — 2026-03-15T00:20:58Z
+**Experiment ID (commit hash):** 9e0721094fd3
+
+**Hypothesis:** Mixup alpha=0.4 will improve generalization on the small 80-patient training set.
+
+**Change made:**
+```diff
+- MIXUP_ALPHA = 0.0
++ MIXUP_ALPHA = 0.4
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6400 |
+| val_acc (std)  | 0.0663 |
+| per_fold_acc   | [0.75, 0.65, 0.65, 0.55, 0.60] |
+| per_class_acc  | NOR=0.45  DCM=0.75  HCM=0.60  MINF=0.75  RV=0.65 |
+| prev best      | 0.7000 |
+
+**Interpretation:** Worse than E2 (0.64 vs 0.70). Mixup alpha=0.4 is too aggressive — train_acc is very low (0.30-0.58) indicating the model can't learn properly with such strong mixing in only 60 epochs. The model needs more epochs to converge with Mixup. Trying FiLM conditioning as a fundamentally different fusion strategy.
+
+**Next hypothesis:** Revert Mixup to 0, keep MAX_EPOCHS=60, and implement FiLM conditioning: use clinical features to generate scale/shift parameters that modulate the MRI feature maps after the final stage.
