@@ -428,3 +428,28 @@
 **Interpretation:** NEW BEST! +0.02 over E2 (0.72 vs 0.70). Folds 1, 2, 3 all at 0.75-0.80. NOR jumped to 0.75, DCM to 0.80. Variance also reduced (0.0812 vs 0.0949). The combination of log-transform + derived features is synergistic. MINF is still the weakest at 0.60. Fold 5 dropped to 0.60 — trying MAX_EPOCHS=80 to see if more training helps.
 
 **Next hypothesis:** Keep log-transform + derived features (7), increase MAX_EPOCHS from 60 to 80 to allow more convergence.
+
+---
+## Experiment 18 — 2026-03-15T00:47:54Z
+**Experiment ID (commit hash):** a8ec8d5433f7
+
+**Hypothesis:** MAX_EPOCHS=80 will allow more convergence with the E17 config.
+
+**Change made:**
+```diff
+- MAX_EPOCHS = 60
++ MAX_EPOCHS = 80
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6900 |
+| val_acc (std)  | 0.0583 |
+| per_fold_acc   | [0.75, 0.75, 0.70, 0.65, 0.60] |
+| per_class_acc  | NOR=0.70  DCM=0.70  HCM=0.65  MINF=0.60  RV=0.80 |
+| prev best      | 0.7200 |
+
+**Interpretation:** Worse than E17 (0.69 vs 0.72). More epochs caused overfitting — fold 5 dropped to 0.60. MAX_EPOCHS=60 is the sweet spot for this config. E17 remains the best. Trying depth flip augmentation on top of E17 config.
+
+**Next hypothesis:** Revert MAX_EPOCHS to 60, keep E17 config (log-transform + derived features), and add depth flip (p=0.5) augmentation only (no intensity jitter/noise).
