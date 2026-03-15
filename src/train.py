@@ -47,7 +47,7 @@ from prepare import NUM_CLASSES, IDX_TO_LABEL, DATA_PROC  # noqa: E402
 
 LR           = 5e-4        # AdamW LR (best known)
 BATCH_SIZE   = 8           # samples per GPU step
-DROPOUT      = 0.5         # dropout probability
+DROPOUT      = 0.6         # dropout probability — increased to reduce overfitting
 WEIGHT_DECAY = 1e-1        # WD=0.1
 
 # Architecture notes (free-text, logged to results.jsonl for the agent)
@@ -56,7 +56,7 @@ ARCH_NOTES = (
     "Gated fusion: gate=sigmoid(Linear(128,128)) applied to MRI feat, concat(gated_mri, clinical)→Linear(256,5). "
     "5-fold CV on 100 patients. CosineAnnealingLR T_max=MAX_EPOCHS. "
     "DROPOUT=0.5. WD=0.1. H+V flip. Standard CE. TTA=8 passes. LR=5e-4. BS=8. "
-    "Clinical z-score normalization (7 features). MAX_EPOCHS=60. Plain CE. H+V+D flips. LR=5e-4. Original arch. CosineAnnealingLR. Gated fusion. BS=8. Log-transform EDV+ESV + derived BMI+SV."
+    "Clinical z-score normalization (7 features). MAX_EPOCHS=60. Plain CE. H+V flips. LR=5e-4. Original arch. CosineAnnealingLR. Gated fusion. BS=8. Log-transform EDV+ESV + derived BMI+SV. DROPOUT=0.6."
 )
 
 MAX_EPOCHS = 60
@@ -375,15 +375,13 @@ def train_one_epoch(
         clinical = augment_clinical(clinical)
         clinical = normalize_clinical(clinical)
 
-        # Augmentation: H+V+D flips
+        # Augmentation: H+V flips only
         B = volumes.size(0)
         for i in range(B):
             if torch.rand(1).item() < 0.5:
                 volumes[i] = torch.flip(volumes[i], dims=[-1])   # H flip
             if torch.rand(1).item() < 0.5:
                 volumes[i] = torch.flip(volumes[i], dims=[-2])   # V flip
-            if torch.rand(1).item() < 0.5:
-                volumes[i] = torch.flip(volumes[i], dims=[-3])   # D flip
 
         # Mixup augmentation
         if MIXUP_ALPHA > 0 and B > 1:
