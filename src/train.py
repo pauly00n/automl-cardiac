@@ -46,7 +46,7 @@ from prepare import NUM_CLASSES, IDX_TO_LABEL, DATA_PROC  # noqa: E402
 # ===========================================================================
 
 LR           = 5e-4        # AdamW LR (best known)
-BATCH_SIZE   = 16          # samples per GPU step — larger batch for stable gradients
+BATCH_SIZE   = 8           # samples per GPU step
 DROPOUT      = 0.5         # dropout probability
 WEIGHT_DECAY = 1e-1        # WD=0.1
 
@@ -56,7 +56,7 @@ ARCH_NOTES = (
     "Gated fusion: gate=sigmoid(Linear(128,128)) applied to MRI feat, concat(gated_mri, clinical)→Linear(256,5). "
     "5-fold CV on 100 patients. CosineAnnealingLR T_max=MAX_EPOCHS. "
     "DROPOUT=0.5. WD=0.1. H+V flip. Standard CE. TTA=8 passes. LR=5e-4. BS=8. "
-    "Clinical z-score normalization (5 features). MAX_EPOCHS=60. Plain CE. H+V flips. LR=5e-4. Original arch. CosineAnnealingLR. Gated fusion. Original ClinicalEncoder. BATCH_SIZE=16."
+    "Clinical z-score normalization (5 features). MAX_EPOCHS=60. Plain CE. H+V flips. LR=5e-4. Original arch. CosineAnnealingLR. Gated fusion. BS=8. Log-transform EDV+ESV clinical features."
 )
 
 MAX_EPOCHS = 60
@@ -322,20 +322,13 @@ _CLINICAL_STD:  torch.Tensor = None
 
 
 def augment_clinical(clinical: torch.Tensor) -> torch.Tensor:
-    """Add derived features: BMI = Weight/Height^2, SV = EDV - ESV.
-    Input: (B, 5) [Height, Weight, EDV, ESV, EF]
-    Output: (B, 7) [Height, Weight, EDV, ESV, EF, BMI, SV]
+    """Log-transform EDV (index 2) and ESV (index 3) to reduce right-skew.
+    Input/Output: (B, 5) [Height, Weight, EDV, ESV, EF]
     """
-    height = clinical[:, 0]  # cm
-    weight = clinical[:, 1]  # kg
-    edv    = clinical[:, 2]
-    esv    = clinical[:, 3]
-    # BMI = weight(kg) / (height(m))^2
-    height_m = height / 100.0
-    bmi = weight / (height_m * height_m + 1e-8)
-    # Stroke volume
-    sv = edv - esv
-    return torch.cat([clinical, bmi.unsqueeze(1), sv.unsqueeze(1)], dim=1)
+    out = clinical.clone()
+    out[:, 2] = torch.log1p(clinical[:, 2])  # log(1 + EDV)
+    out[:, 3] = torch.log1p(clinical[:, 3])  # log(1 + ESV)
+    return out
 
 
 def normalize_clinical(clinical: torch.Tensor) -> torch.Tensor:
@@ -374,7 +367,8 @@ def train_one_epoch(
         clinical = clinical.to(DEVICE, non_blocking=True)
         labels   = labels.to(DEVICE, non_blocking=True)
 
-        # Z-score normalize clinical features
+        # Log-transform EDV/ESV then z-score normalize
+        clinical = augment_clinical(clinical)
         clinical = normalize_clinical(clinical)
 
         # Augmentation: H+V flips only
@@ -436,6 +430,7 @@ def evaluate_with_tta(model, loader):
         volumes  = volumes.to(DEVICE, non_blocking=True)
         clinical = clinical.to(DEVICE, non_blocking=True)
         labels   = labels.to(DEVICE, non_blocking=True)
+        clinical = augment_clinical(clinical)
         clinical = normalize_clinical(clinical)
         B = volumes.size(0)
         probs_sum = torch.zeros(B, NUM_CLASSES, device=DEVICE)
@@ -549,7 +544,7 @@ def main():
         # Compute clinical normalization stats from this fold's training set
         all_clinical = []
         for _, clinical, _ in train_loader:
-            all_clinical.append(clinical)
+            all_clinical.append(augment_clinical(clinical))
         all_clinical = torch.cat(all_clinical, dim=0)
         _CLINICAL_MEAN = all_clinical.mean(dim=0).to(DEVICE)
         _CLINICAL_STD  = all_clinical.std(dim=0).to(DEVICE)
