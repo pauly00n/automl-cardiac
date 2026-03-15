@@ -303,3 +303,29 @@
 **Interpretation:** Worse than E2 (0.64 vs 0.70). Mixup alpha=0.4 is too aggressive — train_acc is very low (0.30-0.58) indicating the model can't learn properly with such strong mixing in only 60 epochs. The model needs more epochs to converge with Mixup. Trying FiLM conditioning as a fundamentally different fusion strategy.
 
 **Next hypothesis:** Revert Mixup to 0, keep MAX_EPOCHS=60, and implement FiLM conditioning: use clinical features to generate scale/shift parameters that modulate the MRI feature maps after the final stage.
+
+---
+## Experiment 13 — 2026-03-15T00:23:35Z
+**Experiment ID (commit hash):** 1a3385a0215b
+
+**Hypothesis:** FiLM conditioning (gamma*mri + beta) will be a more powerful fusion than gated fusion.
+
+**Change made:**
+```diff
+- gate = sigmoid(Linear(128,128)(clinical)); fused = cat[mri*gate, clinical]
++ gamma = Linear(128,128)(clinical); beta = Linear(128,128)(clinical)
++ modulated = gamma * mri + beta; fused = cat[modulated, clinical]
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6600 |
+| val_acc (std)  | 0.1020 |
+| per_fold_acc   | [0.85, 0.65, 0.65, 0.60, 0.55] |
+| per_class_acc  | NOR=0.65  DCM=0.65  HCM=0.55  MINF=0.70  RV=0.75 |
+| prev best      | 0.7000 |
+
+**Interpretation:** Worse than E2 (0.66 vs 0.70). FiLM didn't help — the gated fusion in E2 is better. Fold 5 dropped to 0.55. The original gated fusion is the best fusion strategy found so far. Trying a deeper ClinicalEncoder with dropout to improve the clinical branch.
+
+**Next hypothesis:** Revert to gated fusion, keep MAX_EPOCHS=60, and deepen ClinicalEncoder to 5→64→128→128 with dropout=0.3 between layers.
