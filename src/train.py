@@ -46,7 +46,7 @@ from prepare import NUM_CLASSES, IDX_TO_LABEL, DATA_PROC  # noqa: E402
 # ===========================================================================
 
 LR           = 5e-4        # AdamW LR (best known)
-BATCH_SIZE   = 8           # samples per GPU step
+BATCH_SIZE   = 16          # samples per GPU step — larger batch for stable gradients
 DROPOUT      = 0.5         # dropout probability
 WEIGHT_DECAY = 1e-1        # WD=0.1
 
@@ -56,7 +56,7 @@ ARCH_NOTES = (
     "Gated fusion: gate=sigmoid(Linear(128,128)) applied to MRI feat, concat(gated_mri, clinical)→Linear(256,5). "
     "5-fold CV on 100 patients. CosineAnnealingLR T_max=MAX_EPOCHS. "
     "DROPOUT=0.5. WD=0.1. H+V flip. Standard CE. TTA=8 passes. LR=5e-4. BS=8. "
-    "Clinical z-score normalization (5 features). MAX_EPOCHS=60. Plain CE. H+V flips. LR=5e-4. Original arch. CosineAnnealingLR. Gated fusion restored. Deeper ClinicalEncoder: 5→64→128→128 with dropout=0.3."
+    "Clinical z-score normalization (5 features). MAX_EPOCHS=60. Plain CE. H+V flips. LR=5e-4. Original arch. CosineAnnealingLR. Gated fusion. Original ClinicalEncoder. BATCH_SIZE=16."
 )
 
 MAX_EPOCHS = 60
@@ -268,12 +268,7 @@ class ClinicalEncoder(nn.Module):
             nn.Linear(5, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(inplace=True),
-            nn.Dropout(p=0.3),
             nn.Linear(64, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(p=0.3),
-            nn.Linear(128, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(inplace=True),
         )
