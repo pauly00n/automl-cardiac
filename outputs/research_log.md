@@ -122,3 +122,30 @@
 **Interpretation:** Same as E4 (0.68), still below E2 (0.70). Class weighting didn't help — the model already gets MINF=0.70 and RV=0.80 with plain CE. HCM remains the bottleneck at 0.55. The loss function changes (E4, E5) haven't beaten plain CE. Reverting to plain CE + MAX_EPOCHS=60 and trying richer augmentation (depth flip + intensity jitter + gaussian noise) to improve generalization.
 
 **Next hypothesis:** Keep MAX_EPOCHS=60 + plain CE, add depth flip (p=0.5), intensity jitter, and gaussian noise augmentations to improve generalization.
+
+---
+## Experiment 6 — 2026-03-15T00:00:55Z
+**Experiment ID (commit hash):** 0eb4d3102b89
+
+**Hypothesis:** Adding depth flip + intensity jitter + gaussian noise will improve generalization.
+
+**Change made:**
+```diff
++ if torch.rand(1).item() < 0.5:
++     volumes[i] = torch.flip(volumes[i], dims=[-3])   # D flip
++ volumes = volumes * (1 + 0.1 * torch.randn_like(volumes)).clamp(0,1)
++ volumes = volumes + 0.02 * torch.randn_like(volumes).clamp(0,1)
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6600 |
+| val_acc (std)  | 0.1068 |
+| per_fold_acc   | [0.80, 0.50, 0.60, 0.65, 0.75] |
+| per_class_acc  | NOR=0.95  DCM=0.80  HCM=0.25  MINF=0.80  RV=0.50 |
+| prev best      | 0.7000 |
+
+**Interpretation:** Worse than E2 (0.66 vs 0.70). Heavy augmentation hurt badly — HCM collapsed to 0.25 and RV to 0.50. The intensity jitter + noise is too aggressive for only 60 epochs; the model can't converge properly. Fold 2 dropped to 0.50. Reverting to H+V flips only and trying a fundamentally different direction: enriching the clinical feature set with derived features (BMI, stroke volume).
+
+**Next hypothesis:** Revert augmentation to H+V flips only, keep MAX_EPOCHS=60, and add derived clinical features BMI=Weight/Height² and SV=EDV-ESV to the ClinicalEncoder input (7 features instead of 5).
