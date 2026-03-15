@@ -253,3 +253,28 @@
 **Interpretation:** Worse than E9 (0.65 vs 0.69). The combination of wider encoder + derived features doesn't work — the larger model overfits more with extra features. Three consecutive experiments (E8, E9, E10) haven't beaten E2. Trying a fundamentally different direction: OneCycleLR scheduler with the original architecture (E2 config).
 
 **Next hypothesis:** Revert to original architecture (1→16→32→64→128, 5 features), MAX_EPOCHS=60, and replace CosineAnnealingLR with OneCycleLR (max_lr=5e-4) for better convergence on small datasets.
+
+---
+## Experiment 11 — 2026-03-15T00:18:04Z
+**Experiment ID (commit hash):** 44793179d695
+
+**Hypothesis:** OneCycleLR will converge better than CosineAnnealingLR for small datasets.
+
+**Change made:**
+```diff
+- scheduler = CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS, eta_min=1e-6)
++ scheduler = OneCycleLR(optimizer, max_lr=LR, epochs=MAX_EPOCHS, steps_per_epoch=..., pct_start=0.3)
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6700 |
+| val_acc (std)  | 0.0927 |
+| per_fold_acc   | [0.80, 0.60, 0.55, 0.65, 0.75] |
+| per_class_acc  | NOR=0.65  DCM=0.75  HCM=0.60  MINF=0.65  RV=0.70 |
+| prev best      | 0.7000 |
+
+**Interpretation:** Worse than E2 (0.67 vs 0.70). OneCycleLR didn't help — fold 2 dropped to 0.60 and fold 3 to 0.55. CosineAnnealingLR is better for this task. Reverting to CosineAnnealingLR and trying Mixup augmentation (alpha=0.4) which is known to be effective for small datasets.
+
+**Next hypothesis:** Revert to CosineAnnealingLR, MAX_EPOCHS=60, and enable Mixup (MIXUP_ALPHA=0.4) to improve generalization on the small 80-patient training set.
