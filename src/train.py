@@ -47,7 +47,7 @@ from prepare import NUM_CLASSES, IDX_TO_LABEL, DATA_PROC  # noqa: E402
 
 LR           = 5e-4        # AdamW LR
 BATCH_SIZE   = 8           # samples per GPU step
-DROPOUT      = 0.7         # higher dropout to combat overfitting
+DROPOUT      = 0.65        # dropout probability
 WEIGHT_DECAY = 0.15        # WD=0.15
 
 # Architecture notes (free-text, logged to results.jsonl for the agent)
@@ -56,10 +56,10 @@ ARCH_NOTES = (
     "Gated fusion. 5-fold CV on 100 patients. N_ENSEMBLE=1. CosineAnnealingLR T_max=80. "
     "DROPOUT=0.7. WD=0.15. H+V+D flip + intensity jitter + noise. "
     "label_smoothing=0.1. TTA=8. LR=5e-4. BS=8. "
-    "Clinical z-score normalization (5 features). MAX_EPOCHS=60."
+    "Clinical z-score normalization (5 features). MAX_EPOCHS=80. Simple concat fusion (no gate)."
 )
 
-MAX_EPOCHS = 60
+MAX_EPOCHS = 80
 N_ENSEMBLE = 1  # single model per fold
 SWA_START = 999  # disable SWA
 
@@ -284,25 +284,20 @@ class ClinicalEncoder(nn.Module):
 
 class MultiModalCardiacNet(nn.Module):
     """
-    Gated fusion: sigmoid gate from clinical features weights MRI embedding.
-    Concat(gated_mri, clinical_feat) → Linear(256, NUM_CLASSES).
+    Simple concat fusion: cat(mri_feat, clinical_feat) → Linear(256, NUM_CLASSES).
     """
 
     def __init__(self, num_classes: int = NUM_CLASSES, dropout: float = DROPOUT):
         super().__init__()
         self.mri_encoder      = CardiacCNN3D(num_classes=num_classes, dropout=dropout)
         self.clinical_encoder = ClinicalEncoder()
-        self.gate             = nn.Linear(128, 128)
         self.classifier       = nn.Linear(128 + 128, num_classes)
-        nn.init.xavier_uniform_(self.gate.weight); nn.init.zeros_(self.gate.bias)
         nn.init.xavier_uniform_(self.classifier.weight); nn.init.zeros_(self.classifier.bias)
 
     def forward(self, volumes: torch.Tensor, clinical: torch.Tensor) -> torch.Tensor:
         mri_feat      = self.mri_encoder(volumes)          # (B, 128)
         clinical_feat = self.clinical_encoder(clinical)    # (B, 128)
-        gate          = torch.sigmoid(self.gate(clinical_feat))  # (B, 128)
-        gated_mri     = mri_feat * gate                    # (B, 128)
-        fused         = torch.cat([gated_mri, clinical_feat], dim=1)  # (B, 256)
+        fused         = torch.cat([mri_feat, clinical_feat], dim=1)  # (B, 256)
         return self.classifier(fused)
 
 
