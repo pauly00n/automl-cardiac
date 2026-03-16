@@ -53,12 +53,13 @@ WEIGHT_DECAY = 0.05        # WD=0.05
 # Architecture notes (free-text, logged to results.jsonl for the agent)
 ARCH_NOTES = (
     "MRI+Clinical fusion: ResNet+SE (1→16→32→64→128, ~1.5M params) + ClinicalEncoder MLP(5→64→128). "
-    "Gated fusion. 5-fold CV on 100 patients. CosineAnnealingLR T_max=80. "
+    "Gated fusion. 5-fold CV on 100 patients. N_ENSEMBLE=5 models per fold. CosineAnnealingLR T_max=80. "
     "DROPOUT=0.5. WD=0.05. H+V+D flip + intensity jitter + noise. label_smoothing=0.1. TTA=8. LR=5e-4. BS=8. "
     "Clinical z-score normalization (5 features). MAX_EPOCHS=80."
 )
 
 MAX_EPOCHS = 80
+N_ENSEMBLE = 5  # number of models to train per fold for ensembling
 
 # Training budget (seconds) per fold — do NOT change this
 BUDGET_SECONDS = 180  # 3 minutes per fold
@@ -440,6 +441,64 @@ def evaluate_with_tta(model, loader):
     }
 
 
+@torch.no_grad()
+def evaluate_ensemble_with_tta(models, loader):
+    """Evaluate an ensemble of models with TTA. Average predictions across all models and TTA passes."""
+    for m in models:
+        m.eval()
+        m.to(DEVICE)
+    crit = nn.CrossEntropyLoss()
+    total_loss    = 0.0
+    total_correct = 0
+    total_samples = 0
+    conf_matrix = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=np.int32)
+    tta_flips = [
+        [], [[-1]], [[-2]], [[-3]],
+        [[-1], [-2]], [[-1], [-3]], [[-2], [-3]], [[-1], [-2], [-3]],
+    ]
+    for batch in loader:
+        volumes, clinical, labels = batch
+        volumes  = volumes.to(DEVICE, non_blocking=True)
+        clinical = clinical.to(DEVICE, non_blocking=True)
+        labels   = labels.to(DEVICE, non_blocking=True)
+        clinical = normalize_clinical(clinical)
+        B = volumes.size(0)
+        probs_sum = torch.zeros(B, NUM_CLASSES, device=DEVICE)
+        n_passes = 0
+        for model in models:
+            for flips in tta_flips:
+                aug = volumes.clone()
+                for dims in flips:
+                    aug = torch.flip(aug, dims=dims)
+                probs_sum += torch.softmax(model(aug, clinical), dim=1)
+                n_passes += 1
+        avg_probs = probs_sum / n_passes
+        preds = avg_probs.argmax(dim=1)
+        # Loss on the base (non-augmented) logits from first model
+        logits = models[0](volumes, clinical)
+        loss = crit(logits, labels)
+        total_loss    += loss.item() * B
+        total_correct += (preds == labels).sum().item()
+        total_samples += B
+        for t, p in zip(labels.cpu().numpy(), preds.cpu().numpy()):
+            conf_matrix[int(t), int(p)] += 1
+
+    per_class_acc = {}
+    for cls_idx in range(NUM_CLASSES):
+        cls_total = conf_matrix[cls_idx].sum()
+        cls_correct = conf_matrix[cls_idx, cls_idx]
+        per_class_acc[IDX_TO_LABEL[cls_idx]] = (
+            round(float(cls_correct) / float(cls_total), 4) if cls_total > 0 else 0.0
+        )
+
+    return {
+        "val_acc":       total_correct / max(total_samples, 1),
+        "val_loss":      total_loss    / max(total_samples, 1),
+        "per_class_acc": per_class_acc,
+        "conf_matrix":   conf_matrix,
+    }
+
+
 def collect_all_pt_files():
     """Collect all 100 .pt files from train/val/test dirs, return sorted list + labels."""
     all_files = []
@@ -497,11 +556,6 @@ def main():
 
     for fold_idx, (train_files, val_files) in enumerate(folds):
         fold_seed = FOLD_SEEDS[fold_idx]
-        random.seed(fold_seed)
-        np.random.seed(fold_seed)
-        torch.manual_seed(fold_seed)
-        torch.cuda.manual_seed_all(fold_seed)
-
         log.info("=== Fold %d/%d  (seed=%d, train=%d, val=%d) ===",
                  fold_idx + 1, N_FOLDS, fold_seed, len(train_files), len(val_files))
 
@@ -523,38 +577,51 @@ def main():
         log.info("  Clinical mean: %s", _CLINICAL_MEAN.cpu().numpy().round(2))
         log.info("  Clinical std:  %s", _CLINICAL_STD.cpu().numpy().round(2))
 
-        # Model, optimizer, loss
-        model     = MultiModalCardiacNet(num_classes=NUM_CLASSES, dropout=DROPOUT).to(DEVICE)
-        optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
-        scaler    = GradScaler(enabled=USE_AMP)
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS, eta_min=1e-6)
-        criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-
-        # Train with budget
         t_fold_start = time.time()
         deadline = t_fold_start + BUDGET_SECONDS
-        epoch = 0
-        timed_out = False
 
-        while time.time() < deadline and epoch < MAX_EPOCHS:
-            epoch += 1
-            loss_sum, n_correct, n_total, timed_out = train_one_epoch(
-                model, train_loader, optimizer, criterion, scaler, deadline, scheduler
-            )
-            if n_total > 0 and epoch % 20 == 0:
-                log.info("  Fold %d E%d/%d  train_loss=%.4f  train_acc=%.4f",
-                         fold_idx + 1, epoch, MAX_EPOCHS,
-                         loss_sum / n_total, n_correct / n_total)
-            if timed_out:
+        # Train N_ENSEMBLE models per fold with different seeds
+        ensemble_models = []
+        ensemble_seeds = [fold_seed + i * 1000 for i in range(N_ENSEMBLE)]
+
+        for ens_idx, ens_seed in enumerate(ensemble_seeds):
+            if time.time() >= deadline:
+                log.info("  Budget expired, trained %d/%d ensemble models", ens_idx, N_ENSEMBLE)
                 break
-            if scheduler is not None:
-                scheduler.step()
+
+            random.seed(ens_seed)
+            np.random.seed(ens_seed)
+            torch.manual_seed(ens_seed)
+            torch.cuda.manual_seed_all(ens_seed)
+
+            model     = MultiModalCardiacNet(num_classes=NUM_CLASSES, dropout=DROPOUT).to(DEVICE)
+            optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+            scaler    = GradScaler(enabled=USE_AMP)
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS, eta_min=1e-6)
+            criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+
+            epoch = 0
+            timed_out = False
+            while time.time() < deadline and epoch < MAX_EPOCHS:
+                epoch += 1
+                loss_sum, n_correct, n_total, timed_out = train_one_epoch(
+                    model, train_loader, optimizer, criterion, scaler, deadline, scheduler
+                )
+                if timed_out:
+                    break
+                if scheduler is not None:
+                    scheduler.step()
+
+            log.info("  Fold %d Ens %d/%d: %d epochs (seed=%d)",
+                     fold_idx + 1, ens_idx + 1, N_ENSEMBLE, epoch, ens_seed)
+            ensemble_models.append(model)
+            del optimizer, scaler, scheduler
 
         fold_time = time.time() - t_fold_start
-        log.info("  Fold %d: %d epochs in %.1fs", fold_idx + 1, epoch, fold_time)
+        log.info("  Fold %d: %d models in %.1fs", fold_idx + 1, len(ensemble_models), fold_time)
 
-        # Evaluate this fold
-        metrics = evaluate_with_tta(model, val_loader)
+        # Evaluate ensemble: average TTA predictions across all models
+        metrics = evaluate_ensemble_with_tta(ensemble_models, val_loader)
         log.info("  Fold %d RESULTS → val_acc=%.4f  val_loss=%.4f",
                  fold_idx + 1, metrics["val_acc"], metrics["val_loss"])
         log.info("  Fold %d per-class: %s", fold_idx + 1, metrics["per_class_acc"])
@@ -572,7 +639,8 @@ def main():
         overall_conf_matrix += metrics["conf_matrix"]
 
         # Free GPU memory
-        del model, optimizer, scaler, scheduler
+        for m in ensemble_models:
+            del m
         torch.cuda.empty_cache()
 
     total_time = time.time() - experiment_start
