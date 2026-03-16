@@ -152,3 +152,28 @@ First experiment — no changes from starting config.
 **Interpretation:** Worse (0.62 vs 0.69). Removing label smoothing hurt significantly. Label smoothing was providing important regularization. The best config remains Exp 2 (DROPOUT=0.6, WD=0.1, MAX_EPOCHS=80, label_smoothing=0.1).
 
 **Next hypothesis:** Revert to Exp 2 config (DROPOUT=0.6, WD=0.1, MAX_EPOCHS=80, label_smoothing=0.1). Try N_ENSEMBLE=3 (fewer ensemble members, more diverse) with class-weighted CE to boost HCM and RV.
+
+---
+## Experiment 7 — 2026-03-16T04:48Z
+**Experiment ID (commit hash):** 1d0f9ccbe8e3
+
+**Hypothesis:** N_ENSEMBLE=3 with class-weighted CE (HCM=2.0, RV=1.5) will boost hard classes while ensemble reduces variance.
+
+**Change made:**
+```diff
++ N_ENSEMBLE=3, DROPOUT=0.6, WD=0.1, MAX_EPOCHS=80
++ class_weights = [1.0, 1.0, 2.0, 1.0, 1.5] + label_smoothing=0.1
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6700 |
+| val_acc (std)  | 0.0748 |
+| per_fold_acc   | [0.80, 0.70, 0.60, 0.60, 0.65] |
+| per_class_acc  | NOR=0.70  DCM=0.60  HCM=0.60  MINF=0.75  RV=0.70 |
+| prev best      | 0.6900 |
+
+**Interpretation:** Lower variance (0.075) but lower mean (0.67 vs 0.69). HCM improved to 0.60 (from 0.45-0.50 in Exp 2). Class weights are helping HCM but ensemble is averaging out some correct predictions. The best approach is single model with the right hyperparameters.
+
+**Next hypothesis:** Single model (N_ENSEMBLE=1), keep class-weighted CE (HCM=2.0, RV=1.5) + label_smoothing=0.1, DROPOUT=0.6, WD=0.1, MAX_EPOCHS=80. Also try LR=1e-3 (higher) with OneCycleLR for faster convergence in 80 epochs.
