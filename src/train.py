@@ -48,14 +48,14 @@ from prepare import NUM_CLASSES, IDX_TO_LABEL, DATA_PROC  # noqa: E402
 LR           = 5e-4        # AdamW LR
 BATCH_SIZE   = 8           # samples per GPU step
 DROPOUT      = 0.7         # higher dropout to combat overfitting
-WEIGHT_DECAY = 0.2         # even stronger WD
+WEIGHT_DECAY = 0.15        # WD=0.15
 
 # Architecture notes (free-text, logged to results.jsonl for the agent)
 ARCH_NOTES = (
-    "MRI+Clinical fusion: ResNet+SE (1→16→32→64→128, ~1.5M params) + ClinicalEncoder MLP(5→64→128). "
+    "MRI+Clinical fusion: ResNet+SE (1→16→32→64→128, 2 ResBlocks/stage) + ClinicalEncoder MLP(5→64→128). "
     "Gated fusion. 5-fold CV on 100 patients. N_ENSEMBLE=1. CosineAnnealingLR T_max=80. "
-    "DROPOUT=0.7. WD=0.2. H+V+D flip + intensity jitter + noise. "
-    "Focal Loss (gamma=2.0). TTA=8. LR=5e-4. BS=8. "
+    "DROPOUT=0.7. WD=0.15. H+V+D flip + intensity jitter + noise. "
+    "label_smoothing=0.1. TTA=8. LR=5e-4. BS=8. "
     "Clinical z-score normalization (5 features). MAX_EPOCHS=80."
 )
 
@@ -228,10 +228,10 @@ class CardiacCNN3D(nn.Module):
 
     def __init__(self, num_classes: int = NUM_CLASSES, dropout: float = DROPOUT):
         super().__init__()
-        self.stage1 = nn.Sequential(ConvBlock3D(1,   16,  pool=True),  ResBlock3D(16))
-        self.stage2 = nn.Sequential(ConvBlock3D(16,  32,  pool=True),  ResBlock3D(32))
-        self.stage3 = nn.Sequential(ConvBlock3D(32,  64,  pool=True),  ResBlock3D(64))
-        self.stage4 = nn.Sequential(ConvBlock3D(64,  128, pool=True),  ResBlock3D(128))
+        self.stage1 = nn.Sequential(ConvBlock3D(1,   16,  pool=True),  ResBlock3D(16),  ResBlock3D(16))
+        self.stage2 = nn.Sequential(ConvBlock3D(16,  32,  pool=True),  ResBlock3D(32),  ResBlock3D(32))
+        self.stage3 = nn.Sequential(ConvBlock3D(32,  64,  pool=True),  ResBlock3D(64),  ResBlock3D(64))
+        self.stage4 = nn.Sequential(ConvBlock3D(64,  128, pool=True),  ResBlock3D(128), ResBlock3D(128))
 
         self.gap     = nn.AdaptiveAvgPool3d(1)
         self.dropout = nn.Dropout(p=dropout)
@@ -600,7 +600,7 @@ def main():
             optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
             scaler    = GradScaler(enabled=USE_AMP)
             scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS, eta_min=1e-6)
-            criterion = FocalLoss(gamma=2.0)
+            criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
             # SWA: accumulate model weights from epoch SWA_START onwards
             swa_state = None
