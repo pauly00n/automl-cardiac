@@ -47,19 +47,19 @@ from prepare import NUM_CLASSES, IDX_TO_LABEL, DATA_PROC  # noqa: E402
 
 LR           = 5e-4        # AdamW LR
 BATCH_SIZE   = 8           # samples per GPU step
-DROPOUT      = 0.5         # dropout probability
-WEIGHT_DECAY = 5e-2        # WD=0.05
+DROPOUT      = 0.6         # dropout probability — increased to combat overfitting
+WEIGHT_DECAY = 0.1         # stronger regularization for small dataset
 
 # Architecture notes (free-text, logged to results.jsonl for the agent)
 ARCH_NOTES = (
-    "MRI+Clinical fusion: ResNet+SE (1→16→32→64→128) + ClinicalEncoder MLP(5→64→128). "
+    "MRI+Clinical fusion: ResNet+SE (1→16→32→64→128, ~1.16M params) + ClinicalEncoder MLP(5→64→128). "
     "Gated fusion: gate=sigmoid(Linear(128,128)) applied to MRI feat, concat(gated_mri, clinical)→Linear(256,5). "
-    "5-fold CV on 100 patients. CosineAnnealingLR T_max=200. "
-    "DROPOUT=0.5. WD=0.05. H+V flip. Standard CE. TTA=8 passes. LR=5e-4. BS=8. "
+    "5-fold CV on 100 patients. CosineAnnealingLR T_max=80. "
+    "DROPOUT=0.6. WD=0.1. H+V+D flip + intensity jitter + noise. label_smoothing=0.1. TTA=8. LR=5e-4. BS=8. "
     "Clinical z-score normalization (5 features)."
 )
 
-MAX_EPOCHS = 200
+MAX_EPOCHS = 80
 
 # Training budget (seconds) per fold — do NOT change this
 BUDGET_SECONDS = 180  # 3 minutes per fold
@@ -219,22 +219,19 @@ class ResBlock3D(nn.Module):
 
 class CardiacCNN3D(nn.Module):
     """
-    4-stage ResNet+SE 3D CNN with wider channels (1→32→64→128→256).
-    Two ResBlocks per stage for deeper feature extraction.
-    Projects final 256-d features down to 128-d for fusion.
+    4-stage ResNet+SE 3D CNN (1→16→32→64→128).
     Input:  (B, 1, D=16, H=128, W=128)
     Output: (B, 128)
     """
 
     def __init__(self, num_classes: int = NUM_CLASSES, dropout: float = DROPOUT):
         super().__init__()
-        self.stage1 = nn.Sequential(ConvBlock3D(1,   32,  pool=True),  ResBlock3D(32),  ResBlock3D(32))
-        self.stage2 = nn.Sequential(ConvBlock3D(32,  64,  pool=True),  ResBlock3D(64),  ResBlock3D(64))
-        self.stage3 = nn.Sequential(ConvBlock3D(64,  128, pool=True),  ResBlock3D(128), ResBlock3D(128))
-        self.stage4 = nn.Sequential(ConvBlock3D(128, 256, pool=True),  ResBlock3D(256), ResBlock3D(256))
+        self.stage1 = nn.Sequential(ConvBlock3D(1,   16,  pool=True),  ResBlock3D(16))
+        self.stage2 = nn.Sequential(ConvBlock3D(16,  32,  pool=True),  ResBlock3D(32))
+        self.stage3 = nn.Sequential(ConvBlock3D(32,  64,  pool=True),  ResBlock3D(64))
+        self.stage4 = nn.Sequential(ConvBlock3D(64,  128, pool=True),  ResBlock3D(128))
 
         self.gap     = nn.AdaptiveAvgPool3d(1)
-        self.project = nn.Linear(256, 128)
         self.dropout = nn.Dropout(p=dropout)
 
         self._init_weights()
@@ -253,30 +250,24 @@ class CardiacCNN3D(nn.Module):
         x = self.stage2(x)
         x = self.stage3(x)
         x = self.stage4(x)
-        x = self.gap(x).flatten(1)   # (B, 256)
-        x = self.project(x)          # (B, 128)
+        x = self.gap(x).flatten(1)   # (B, 128)
         return self.dropout(x)
 
 
 class ClinicalEncoder(nn.Module):
     """
-    Deeper MLP encoder for tabular clinical features with dropout.
+    MLP encoder for tabular clinical features.
     Input:  (B, 5)  — [Height, Weight, EDV, ESV, EF]
     Output: (B, 128)
     """
 
-    def __init__(self, dropout: float = 0.3):
+    def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(5, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(inplace=True),
-            nn.Dropout(p=dropout),
             nn.Linear(64, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(p=dropout),
-            nn.Linear(128, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(inplace=True),
         )
@@ -289,61 +280,27 @@ class ClinicalEncoder(nn.Module):
         return self.net(x)  # (B, 128)
 
 
-class CrossAttentionFusion(nn.Module):
-    """
-    Cross-attention: clinical query attends over MRI key/value.
-    Produces a 128-d attended MRI representation conditioned on clinical data.
-    """
-
-    def __init__(self, dim: int = 128):
-        super().__init__()
-        self.q_proj = nn.Linear(dim, dim)
-        self.k_proj = nn.Linear(dim, dim)
-        self.v_proj = nn.Linear(dim, dim)
-        self.scale  = dim ** -0.5
-        self.out_proj = nn.Linear(dim, dim)
-        for m in [self.q_proj, self.k_proj, self.v_proj, self.out_proj]:
-            nn.init.xavier_uniform_(m.weight)
-            nn.init.zeros_(m.bias)
-
-    def forward(self, mri_feat: torch.Tensor, clinical_feat: torch.Tensor) -> torch.Tensor:
-        # mri_feat: (B, 128), clinical_feat: (B, 128)
-        Q = self.q_proj(clinical_feat).unsqueeze(1)   # (B, 1, 128)
-        K = self.k_proj(mri_feat).unsqueeze(1)        # (B, 1, 128)
-        V = self.v_proj(mri_feat).unsqueeze(1)        # (B, 1, 128)
-        attn = torch.softmax(Q @ K.transpose(-2, -1) * self.scale, dim=-1)  # (B, 1, 1)
-        attended = (attn @ V).squeeze(1)              # (B, 128)
-        return self.out_proj(attended)
-
-
 class MultiModalCardiacNet(nn.Module):
     """
-    Cross-attention fusion: clinical embedding attends over MRI features.
-    Concat(attended_mri, clinical_feat) → Linear(256, NUM_CLASSES).
+    Gated fusion: sigmoid gate from clinical features weights MRI embedding.
+    Concat(gated_mri, clinical_feat) → Linear(256, NUM_CLASSES).
     """
 
     def __init__(self, num_classes: int = NUM_CLASSES, dropout: float = DROPOUT):
         super().__init__()
         self.mri_encoder      = CardiacCNN3D(num_classes=num_classes, dropout=dropout)
         self.clinical_encoder = ClinicalEncoder()
-        self.cross_attn       = CrossAttentionFusion(dim=128)
+        self.gate             = nn.Linear(128, 128)
         self.classifier       = nn.Linear(128 + 128, num_classes)
+        nn.init.xavier_uniform_(self.gate.weight); nn.init.zeros_(self.gate.bias)
         nn.init.xavier_uniform_(self.classifier.weight); nn.init.zeros_(self.classifier.bias)
 
-    def _mri_embed(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.mri_encoder.stage1(x)
-        x = self.mri_encoder.stage2(x)
-        x = self.mri_encoder.stage3(x)
-        x = self.mri_encoder.stage4(x)
-        x = self.mri_encoder.gap(x).flatten(1)
-        x = self.mri_encoder.project(x)
-        return self.mri_encoder.dropout(x)
-
     def forward(self, volumes: torch.Tensor, clinical: torch.Tensor) -> torch.Tensor:
-        mri_feat      = self._mri_embed(volumes)
-        clinical_feat = self.clinical_encoder(clinical)
-        attended_mri  = self.cross_attn(mri_feat, clinical_feat)
-        fused         = torch.cat([attended_mri, clinical_feat], dim=1)
+        mri_feat      = self.mri_encoder(volumes)          # (B, 128)
+        clinical_feat = self.clinical_encoder(clinical)    # (B, 128)
+        gate          = torch.sigmoid(self.gate(clinical_feat))  # (B, 128)
+        gated_mri     = mri_feat * gate                    # (B, 128)
+        fused         = torch.cat([gated_mri, clinical_feat], dim=1)  # (B, 256)
         return self.classifier(fused)
 
 
@@ -571,7 +528,7 @@ def main():
         model     = MultiModalCardiacNet(num_classes=NUM_CLASSES, dropout=DROPOUT).to(DEVICE)
         optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
         scaler    = GradScaler(enabled=USE_AMP)
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200, eta_min=1e-6)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS, eta_min=1e-6)
         criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
         # Train with budget
