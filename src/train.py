@@ -47,21 +47,21 @@ from prepare import NUM_CLASSES, IDX_TO_LABEL, DATA_PROC  # noqa: E402
 
 LR           = 5e-4        # AdamW LR
 BATCH_SIZE   = 8           # samples per GPU step
-DROPOUT      = 0.6         # dropout probability
-WEIGHT_DECAY = 0.1         # WD=0.1
+DROPOUT      = 0.7         # higher dropout to combat overfitting
+WEIGHT_DECAY = 0.15        # stronger WD
 
 # Architecture notes (free-text, logged to results.jsonl for the agent)
 ARCH_NOTES = (
     "MRI+Clinical fusion: ResNet+SE (1→16→32→64→128, ~1.5M params) + ClinicalEncoder MLP(5→64→128). "
     "Gated fusion. 5-fold CV on 100 patients. N_ENSEMBLE=1. CosineAnnealingLR T_max=80. "
-    "DROPOUT=0.6. WD=0.1. H+V+D flip + intensity jitter + noise. "
+    "DROPOUT=0.7. WD=0.15. H+V+D flip + intensity jitter + noise. "
     "label_smoothing=0.1. TTA=8. LR=5e-4. BS=8. "
-    "Clinical z-score normalization (5 features). MAX_EPOCHS=80. SWA from epoch 60."
+    "Clinical z-score normalization (5 features). MAX_EPOCHS=80."
 )
 
 MAX_EPOCHS = 80
 N_ENSEMBLE = 1  # single model per fold
-SWA_START = 60  # start SWA averaging from this epoch
+SWA_START = 999  # disable SWA
 
 # Training budget (seconds) per fold — do NOT change this
 BUDGET_SECONDS = 180  # 3 minutes per fold
