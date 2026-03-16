@@ -279,3 +279,28 @@ First experiment — no changes from starting config.
 **Interpretation:** New best! val_acc=0.71 (+0.02 over Exp 2). Stronger regularization is helping — Fold 3 improved from 0.60 to 0.70, Fold 4 from 0.55 to 0.65. NOR, DCM, RV are all strong (0.75-0.80). HCM=0.45 remains the weakest class. The model needs even more regularization or a different approach for HCM.
 
 **Next hypothesis:** Keep DROPOUT=0.7, WD=0.15. Try N_ENSEMBLE=3 to reduce variance further. With 80 epochs per model (~23s), 3 models fit in ~69s per fold.
+
+---
+## Experiment 12 — 2026-03-16T05:18Z
+**Experiment ID (commit hash):** 5704453fdb47
+
+**Hypothesis:** N_ENSEMBLE=3 with DROPOUT=0.7, WD=0.15 will reduce variance through ensembling.
+
+**Change made:**
+```diff
+- N_ENSEMBLE=1
++ N_ENSEMBLE=3
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.7000 |
+| val_acc (std)  | 0.0775 |
+| per_fold_acc   | [0.85, 0.65, 0.65, 0.65, 0.70] |
+| per_class_acc  | NOR=0.75  DCM=0.75  HCM=0.50  MINF=0.85  RV=0.65 |
+| prev best      | 0.7100 |
+
+**Interpretation:** Slightly worse than single model (0.70 vs 0.71). Ensemble is averaging out correct predictions. Single model with strong regularization is better. MINF=0.85 is excellent.
+
+**Next hypothesis:** Single model (N_ENSEMBLE=1), DROPOUT=0.7, WD=0.2 (even stronger WD). Also try Focal Loss (gamma=2.0) instead of CE to focus on hard examples like HCM.
