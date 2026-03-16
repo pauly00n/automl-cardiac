@@ -53,14 +53,15 @@ WEIGHT_DECAY = 0.1         # WD=0.1
 # Architecture notes (free-text, logged to results.jsonl for the agent)
 ARCH_NOTES = (
     "MRI+Clinical fusion: ResNet+SE (1→16→32→64→128, ~1.5M params) + ClinicalEncoder MLP(5→64→128). "
-    "Gated fusion. 5-fold CV on 100 patients. N_ENSEMBLE=1. CosineAnnealingWarmRestarts T_0=40. "
+    "Gated fusion. 5-fold CV on 100 patients. N_ENSEMBLE=1. CosineAnnealingLR T_max=80. "
     "DROPOUT=0.6. WD=0.1. H+V+D flip + intensity jitter + noise. "
     "label_smoothing=0.1. TTA=8. LR=5e-4. BS=8. "
-    "Clinical z-score normalization (5 features). MAX_EPOCHS=500 (budget-limited)."
+    "Clinical z-score normalization (5 features). MAX_EPOCHS=80. SWA from epoch 60."
 )
 
-MAX_EPOCHS = 500  # budget will naturally stop training at ~180s per fold
+MAX_EPOCHS = 80
 N_ENSEMBLE = 1  # single model per fold
+SWA_START = 60  # start SWA averaging from this epoch
 
 # Training budget (seconds) per fold — do NOT change this
 BUDGET_SECONDS = 180  # 3 minutes per fold
@@ -598,8 +599,12 @@ def main():
             model     = MultiModalCardiacNet(num_classes=NUM_CLASSES, dropout=DROPOUT).to(DEVICE)
             optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
             scaler    = GradScaler(enabled=USE_AMP)
-            scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=40, T_mult=2, eta_min=1e-6)
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS, eta_min=1e-6)
             criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+
+            # SWA: accumulate model weights from epoch SWA_START onwards
+            swa_state = None
+            swa_count = 0
 
             epoch = 0
             timed_out = False
@@ -612,6 +617,35 @@ def main():
                     break
                 if scheduler is not None:
                     scheduler.step()
+
+                # SWA: average weights from SWA_START epoch onwards
+                if epoch >= SWA_START:
+                    if swa_state is None:
+                        swa_state = {k: v.clone() for k, v in model.state_dict().items()}
+                        swa_count = 1
+                    else:
+                        for k, v in model.state_dict().items():
+                            swa_state[k] += v
+                        swa_count += 1
+
+            # Apply SWA averaged weights
+            if swa_state is not None and swa_count > 0:
+                for k in swa_state:
+                    if swa_state[k].is_floating_point():
+                        swa_state[k] /= swa_count
+                    else:
+                        swa_state[k] = swa_state[k] // swa_count
+                model.load_state_dict(swa_state)
+                # Update BN stats with SWA weights
+                model.train()
+                with torch.no_grad():
+                    for batch in train_loader:
+                        volumes, clinical, labels = batch
+                        volumes = volumes.to(DEVICE, non_blocking=True)
+                        clinical = clinical.to(DEVICE, non_blocking=True)
+                        clinical = normalize_clinical(clinical)
+                        model(volumes, clinical)
+                log.info("  SWA applied: averaged %d checkpoints from epoch %d", swa_count, SWA_START)
 
             log.info("  Fold %d Ens %d/%d: %d epochs (seed=%d)",
                      fold_idx + 1, ens_idx + 1, N_ENSEMBLE, epoch, ens_seed)
