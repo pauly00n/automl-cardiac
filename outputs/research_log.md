@@ -354,3 +354,28 @@ First experiment — no changes from starting config.
 **Interpretation:** Worse (0.65 vs 0.71). More parameters = more overfitting. The 1-ResBlock architecture is better for this small dataset.
 
 **Next hypothesis:** Revert to exact Exp 11 config (1 ResBlock/stage, DROPOUT=0.7, WD=0.15, label_smoothing=0.1). Try reducing augmentation — remove depth flip and reduce intensity jitter/noise. The current augmentation may be too aggressive.
+
+---
+## Experiment 15 — 2026-03-16T05:28Z
+**Experiment ID (commit hash):** 8deae132bb45
+
+**Hypothesis:** Minimal augmentation (H flip only, TTA=2) will reduce noise and improve accuracy.
+
+**Change made:**
+```diff
+- H+V+D flip + intensity jitter + noise, TTA=8
++ H flip only, TTA=2
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6500 |
+| val_acc (std)  | 0.0548 |
+| per_fold_acc   | [0.75, 0.65, 0.60, 0.65, 0.60] |
+| per_class_acc  | NOR=0.50  DCM=0.75  HCM=0.50  MINF=0.80  RV=0.70 |
+| prev best      | 0.7100 |
+
+**Interpretation:** Lower variance (0.055) but lower mean (0.65 vs 0.71). The full augmentation is needed — it provides important regularization. NOR dropped to 0.50 without V flip.
+
+**Next hypothesis:** Revert to full augmentation (H+V+D flip + jitter + noise, TTA=8). Try a heterogeneous ensemble: train 6 models per fold with different hyperparameters (3 with DROPOUT=0.7 + 3 with DROPOUT=0.5) to create diverse predictions.
