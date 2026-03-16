@@ -23,3 +23,32 @@ First experiment — no changes from starting config.
 **Interpretation:** The wider CNN (10.7M params) is severely overfitting on 80 training patients — train_acc reaches 0.95+ but val_acc is only 0.59. HCM and MINF are at chance (0.50). The cross-attention fusion with this large model is not working well. Need to dramatically reduce model size.
 
 **Next hypothesis:** Revert to smaller CNN (1→16→32→64→128, ~1.16M params) with gated fusion (simpler than cross-attention), reduce MAX_EPOCHS to 80, increase DROPOUT to 0.6, and increase WEIGHT_DECAY to 0.1 to combat overfitting.
+
+---
+## Experiment 2 — 2026-03-16T04:17Z
+**Experiment ID (commit hash):** 87bcd87ed9c7
+
+**Hypothesis:** Smaller CNN (1→16→32→64→128, 1.5M params) with gated fusion, DROPOUT=0.6, WD=0.1, MAX_EPOCHS=80 will reduce overfitting and improve val_acc.
+
+**Change made:**
+```diff
+- CardiacCNN3D: 1→32→64→128→256 (10.7M params), cross-attention fusion
++ CardiacCNN3D: 1→16→32→64→128 (1.5M params), gated fusion
+- DROPOUT=0.5, WD=0.05, MAX_EPOCHS=200
++ DROPOUT=0.6, WD=0.1, MAX_EPOCHS=80
+- ClinicalEncoder: 3-layer (5→64→128→128 with dropout)
++ ClinicalEncoder: 2-layer (5→64→128)
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6900 |
+| val_acc (std)  | 0.1068 |
+| per_fold_acc   | [0.85, 0.70, 0.60, 0.55, 0.75] |
+| per_class_acc  | NOR=0.85  DCM=0.70  HCM=0.45  MINF=0.80  RV=0.65 |
+| prev best      | 0.5900 |
+
+**Interpretation:** Big improvement (+0.10). Smaller model generalizes much better. Fold 1 hit 0.85! But high variance (0.1068) and HCM is weak (0.45). The model only uses ~23s per fold (well under 180s budget) — 80 epochs is too few. Need more epochs to use the full budget. MINF jumped to 0.80 — the gated fusion with z-score normalization is working well for MINF.
+
+**Next hypothesis:** Increase MAX_EPOCHS to 200 to use more of the 180s budget. Keep DROPOUT=0.6 and WD=0.1 to prevent overfitting with more epochs.
