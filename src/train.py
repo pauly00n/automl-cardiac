@@ -47,19 +47,20 @@ from prepare import NUM_CLASSES, IDX_TO_LABEL, DATA_PROC  # noqa: E402
 
 LR           = 5e-4        # AdamW LR
 BATCH_SIZE   = 8           # samples per GPU step
-DROPOUT      = 0.5         # dropout probability
-WEIGHT_DECAY = 0.05        # WD=0.05
+DROPOUT      = 0.6         # dropout probability
+WEIGHT_DECAY = 0.1         # WD=0.1
 
 # Architecture notes (free-text, logged to results.jsonl for the agent)
 ARCH_NOTES = (
     "MRI+Clinical fusion: ResNet+SE (1→16→32→64→128, ~1.5M params) + ClinicalEncoder MLP(5→64→128). "
-    "Gated fusion. 5-fold CV on 100 patients. N_ENSEMBLE=1. CosineAnnealingLR T_max=120. "
-    "DROPOUT=0.5. WD=0.05. H+V+D flip + intensity jitter + noise. Standard CE (no label smoothing). TTA=8. "
-    "LR=5e-4. BS=8. Clinical z-score normalization (5 features). MAX_EPOCHS=120."
+    "Gated fusion. 5-fold CV on 100 patients. N_ENSEMBLE=3. CosineAnnealingLR T_max=80. "
+    "DROPOUT=0.6. WD=0.1. H+V+D flip + intensity jitter + noise. "
+    "Class-weighted CE (HCM=2.0, RV=1.5) + label_smoothing=0.1. TTA=8. "
+    "LR=5e-4. BS=8. Clinical z-score normalization (5 features). MAX_EPOCHS=80."
 )
 
-MAX_EPOCHS = 120
-N_ENSEMBLE = 1  # single model per fold
+MAX_EPOCHS = 80
+N_ENSEMBLE = 3  # 3 models per fold for ensembling
 
 # Training budget (seconds) per fold — do NOT change this
 BUDGET_SECONDS = 180  # 3 minutes per fold
@@ -598,7 +599,8 @@ def main():
             optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
             scaler    = GradScaler(enabled=USE_AMP)
             scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS, eta_min=1e-6)
-            criterion = nn.CrossEntropyLoss()
+            class_weights = torch.tensor([1.0, 1.0, 2.0, 1.0, 1.5], device=DEVICE)  # NOR, DCM, HCM, MINF, RV
+            criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.1)
 
             epoch = 0
             timed_out = False
