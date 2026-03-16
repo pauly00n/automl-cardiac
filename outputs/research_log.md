@@ -252,3 +252,30 @@ First experiment — no changes from starting config.
 **Interpretation:** SWA didn't help (0.66 vs 0.69). Averaging over 21 checkpoints smooths out discriminative features. Fold 1 still hits 0.85 but other folds are weak. The high variance across folds is the main issue.
 
 **Next hypothesis:** Remove SWA. Try DROPOUT=0.7 (more aggressive) with WD=0.15 — the model is clearly overfitting (train_acc=0.95+ vs val_acc=0.55-0.65 on weak folds). More aggressive regularization may help the weak folds without hurting the strong ones.
+
+---
+## Experiment 11 — 2026-03-16T05:11Z
+**Experiment ID (commit hash):** 1e8f89e19253
+
+**Hypothesis:** DROPOUT=0.7, WD=0.15 — stronger regularization will reduce overfitting on weak folds.
+
+**Change made:**
+```diff
+- DROPOUT=0.6, WD=0.1
++ DROPOUT=0.7, WD=0.15
+- SWA from epoch 60
++ SWA disabled
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.7100 |
+| val_acc (std)  | 0.0860 |
+| per_fold_acc   | [0.85, 0.60, 0.70, 0.65, 0.75] |
+| per_class_acc  | NOR=0.80  DCM=0.75  HCM=0.45  MINF=0.75  RV=0.80 |
+| prev best      | 0.6900 |
+
+**Interpretation:** New best! val_acc=0.71 (+0.02 over Exp 2). Stronger regularization is helping — Fold 3 improved from 0.60 to 0.70, Fold 4 from 0.55 to 0.65. NOR, DCM, RV are all strong (0.75-0.80). HCM=0.45 remains the weakest class. The model needs even more regularization or a different approach for HCM.
+
+**Next hypothesis:** Keep DROPOUT=0.7, WD=0.15. Try N_ENSEMBLE=3 to reduce variance further. With 80 epochs per model (~23s), 3 models fit in ~69s per fold.
