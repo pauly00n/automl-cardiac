@@ -430,3 +430,68 @@ First experiment — no changes from starting config.
 **Interpretation:** Worse (0.66 vs 0.71). 60 epochs is too few — the model needs 80 epochs to converge. 80 epochs is the sweet spot.
 
 **Next hypothesis:** Revert to MAX_EPOCHS=80. Try simple concat fusion (no gating) — the gate may be adding unnecessary complexity. Also try DROPOUT=0.65 (between 0.6 and 0.7).
+
+---
+## Experiment 18 — 2026-03-16T05:37Z
+**Experiment ID (commit hash):** caef91317ef0
+
+**Hypothesis:** Simple concat fusion (no gate) with DROPOUT=0.65 will be simpler and more robust.
+
+**Change made:**
+```diff
+- Gated fusion, DROPOUT=0.7
++ Simple concat fusion (no gate), DROPOUT=0.65
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6800 |
+| val_acc (std)  | 0.1077 |
+| per_fold_acc   | [0.85, 0.55, 0.65, 0.60, 0.75] |
+| per_class_acc  | NOR=0.80  DCM=0.75  HCM=0.40  MINF=0.85  RV=0.60 |
+| prev best      | 0.7100 |
+
+**Interpretation:** Slightly worse (0.68 vs 0.71). Simple concat is not as good as gated fusion. The gate helps the model selectively use MRI features based on clinical context. HCM=0.40 is the worst yet without the gate.
+
+---
+
+## Final Summary
+
+**Best experiment (commit hash):** 1e8f89e19253 (Experiment 11)
+**Best mean val_acc (5 folds):** 0.7100 ± 0.0860
+**Best overall_acc:** 0.7100
+**Best config:**
+- Architecture: 4-stage ResNet+SE 3D CNN (1→16→32→64→128, 1 ResBlock/stage, ~1.5M params)
+- Fusion: Gated fusion — sigmoid(Linear(clinical_128, 128)) gates MRI embedding element-wise
+- ClinicalEncoder: MLP(5→64→128) with BN+ReLU
+- Single model per fold (N_ENSEMBLE=1)
+- LR: 5e-4 (AdamW), CosineAnnealingLR T_max=80
+- Weight decay: 0.15
+- Dropout: 0.7
+- Augmentation: H+V+D flip + intensity jitter (0.05) + Gaussian noise (0.01)
+- Loss: CrossEntropyLoss with label_smoothing=0.1
+- Inference: TTA (8 H/V/D flip combinations)
+- Clinical normalization: Z-score (train-set mean/std per fold)
+- MAX_EPOCHS: 80
+
+**Key findings:**
+1. **Model size is critical.** The wider CNN (10.7M params, Exp 1) severely overfits on 80 training patients (val_acc=0.59). The smaller CNN (1.5M params) is much better (val_acc=0.71). With only 80 training samples, parameter efficiency is paramount.
+2. **Strong regularization is essential.** DROPOUT=0.7 + WD=0.15 + label_smoothing=0.1 is the optimal regularization combo. Lower dropout (0.5-0.6) or lower WD (0.05) leads to overfitting. Higher WD (0.2) leads to underfitting.
+3. **Gated fusion outperforms simple concat and cross-attention.** The gate allows clinical features to selectively modulate MRI features, which is important for classes like MINF where EF is the key discriminator.
+4. **80 epochs is the sweet spot.** Fewer (60) underfits, more (120-500) overfits. The model trains in ~23s per fold, well under the 180s budget.
+5. **Ensembling doesn't help.** Multiple models per fold (N_ENSEMBLE=3-5) consistently performed worse than a single well-regularized model. The models are too similar to provide meaningful diversity.
+6. **Full augmentation is important.** H+V+D flip + intensity jitter + noise provides essential regularization. Removing augmentation (Exp 15) reduced accuracy.
+7. **SWA doesn't help.** Averaging weights over the last 20 epochs smoothed out discriminative features.
+
+**Hard classes analysis:**
+- MINF: 0.75 accuracy — improved significantly with gated fusion + z-score normalization. The model uses EF (low in MINF) effectively through the clinical branch.
+- RV: 0.80 accuracy — the best it's been. RV has distinctive morphology visible in MRI.
+- HCM: 0.45 accuracy — the hardest class. HCM has preserved EF (similar to NOR) and subtle morphological changes that are hard to detect in 3D MRI with limited training data.
+
+**Recommended next steps (beyond 3-min budget):**
+- **Transfer learning:** Use pretrained 3D medical image models (Med3D, Models Genesis) as feature extractors
+- **More data:** Data augmentation with elastic deformations, or synthetic data generation
+- **Longer training:** With a 10-minute budget, train for 300+ epochs with early stopping
+- **Multi-scale features:** Extract features at multiple spatial resolutions and fuse them
+- **Attention mechanisms:** Use spatial attention in the MRI encoder to focus on discriminative regions (e.g., septal wall for HCM)
