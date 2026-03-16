@@ -52,3 +52,28 @@ First experiment — no changes from starting config.
 **Interpretation:** Big improvement (+0.10). Smaller model generalizes much better. Fold 1 hit 0.85! But high variance (0.1068) and HCM is weak (0.45). The model only uses ~23s per fold (well under 180s budget) — 80 epochs is too few. Need more epochs to use the full budget. MINF jumped to 0.80 — the gated fusion with z-score normalization is working well for MINF.
 
 **Next hypothesis:** Increase MAX_EPOCHS to 200 to use more of the 180s budget. Keep DROPOUT=0.6 and WD=0.1 to prevent overfitting with more epochs.
+
+---
+## Experiment 3 — 2026-03-16T04:23Z
+**Experiment ID (commit hash):** 392d1827d683
+
+**Hypothesis:** MAX_EPOCHS=200 will use more of the 180s budget and improve convergence.
+
+**Change made:**
+```diff
+- MAX_EPOCHS = 80
++ MAX_EPOCHS = 200
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6700 |
+| val_acc (std)  | 0.1166 |
+| per_fold_acc   | [0.80, 0.65, 0.60, 0.50, 0.80] |
+| per_class_acc  | NOR=0.80  DCM=0.65  HCM=0.50  MINF=0.75  RV=0.65 |
+| prev best      | 0.6900 |
+
+**Interpretation:** Worse than Exp 2 (0.67 vs 0.69). More epochs leads to overfitting — train_acc reaches 0.97+ but val_acc drops. The model uses ~57s per fold with 200 epochs. The sweet spot was 80 epochs (~23s). Should use remaining budget for ensembling multiple models rather than training one model longer.
+
+**Next hypothesis:** Revert to MAX_EPOCHS=80. Try DROPOUT=0.5 (slightly less) and WD=0.05 (less aggressive) — the current regularization may be too strong, preventing the model from learning enough in 80 epochs.
