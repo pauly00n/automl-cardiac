@@ -405,3 +405,28 @@ First experiment — no changes from starting config.
 **Interpretation:** Worse (0.67 vs 0.71). LR=2e-4 is too low for 80 epochs — the model doesn't converge enough. LR=5e-4 is the sweet spot.
 
 **Next hypothesis:** Revert to LR=5e-4. Try MAX_EPOCHS=60 (fewer epochs) — maybe 80 epochs is slightly too many and the model starts overfitting in the last 20 epochs.
+
+---
+## Experiment 17 — 2026-03-16T05:34Z
+**Experiment ID (commit hash):** 4ea68eca9de8
+
+**Hypothesis:** MAX_EPOCHS=60 will prevent late overfitting.
+
+**Change made:**
+```diff
+- MAX_EPOCHS=80, LR=2e-4
++ MAX_EPOCHS=60, LR=5e-4
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6600 |
+| val_acc (std)  | 0.0860 |
+| per_fold_acc   | [0.80, 0.55, 0.65, 0.60, 0.70] |
+| per_class_acc  | NOR=0.65  DCM=0.75  HCM=0.45  MINF=0.80  RV=0.65 |
+| prev best      | 0.7100 |
+
+**Interpretation:** Worse (0.66 vs 0.71). 60 epochs is too few — the model needs 80 epochs to converge. 80 epochs is the sweet spot.
+
+**Next hypothesis:** Revert to MAX_EPOCHS=80. Try simple concat fusion (no gating) — the gate may be adding unnecessary complexity. Also try DROPOUT=0.65 (between 0.6 and 0.7).
