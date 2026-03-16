@@ -379,3 +379,29 @@ First experiment — no changes from starting config.
 **Interpretation:** Lower variance (0.055) but lower mean (0.65 vs 0.71). The full augmentation is needed — it provides important regularization. NOR dropped to 0.50 without V flip.
 
 **Next hypothesis:** Revert to full augmentation (H+V+D flip + jitter + noise, TTA=8). Try a heterogeneous ensemble: train 6 models per fold with different hyperparameters (3 with DROPOUT=0.7 + 3 with DROPOUT=0.5) to create diverse predictions.
+
+---
+## Experiment 16 — 2026-03-16T05:31Z
+**Experiment ID (commit hash):** e99a4f23404b
+
+**Hypothesis:** LR=2e-4 (lower) will converge more smoothly in 80 epochs.
+
+**Change made:**
+```diff
+- LR=5e-4
++ LR=2e-4
++ Restored full augmentation + TTA=8
+```
+
+**Results:**
+| Metric | Value |
+|--------|-------|
+| val_acc (mean) | 0.6700 |
+| val_acc (std)  | 0.0748 |
+| per_fold_acc   | [0.80, 0.60, 0.65, 0.60, 0.70] |
+| per_class_acc  | NOR=0.75  DCM=0.70  HCM=0.45  MINF=0.75  RV=0.70 |
+| prev best      | 0.7100 |
+
+**Interpretation:** Worse (0.67 vs 0.71). LR=2e-4 is too low for 80 epochs — the model doesn't converge enough. LR=5e-4 is the sweet spot.
+
+**Next hypothesis:** Revert to LR=5e-4. Try MAX_EPOCHS=60 (fewer epochs) — maybe 80 epochs is slightly too many and the model starts overfitting in the last 20 epochs.
